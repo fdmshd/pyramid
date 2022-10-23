@@ -2,6 +2,8 @@ package pyramid
 
 import "sync"
 
+const sizeOfChunk = 4
+
 // f - the function that needs to be performed at each level
 func BuildPyramid(f func(intens [][]uint8, lvl int), firstLvl [][]uint8, levels, goVal int) {
 	next := firstLvl
@@ -42,7 +44,7 @@ func Enlarge(intensity [][]uint8) [][]uint8 {
 	return newIntens
 }
 
-func NextLvl(enlarged [][]uint8, numThreads int) [][]uint8 {
+func NextLvl(enlarged [][]uint8, numGoroutines int) [][]uint8 {
 	n := len(enlarged) - 2
 	m := len(enlarged[0]) - 2
 	res := make([][]uint8, n/2)
@@ -50,30 +52,36 @@ func NextLvl(enlarged [][]uint8, numThreads int) [][]uint8 {
 		res[i] = make([]uint8, m/2)
 	}
 
-	totalChunks := n * m / 4
-	chunksPerThread := totalChunks / numThreads
+	totalChunks := n * m / sizeOfChunk
+	if totalChunks < numGoroutines {
+		numGoroutines = totalChunks
+	}
+	chunksPerGoroutine := totalChunks / numGoroutines
 	chunksPerRow := m / 2
 	var wg sync.WaitGroup
-	wg.Add(numThreads)
-	for thread := 0; thread < numThreads; thread++ {
+	wg.Add(numGoroutines)
+	for goroutine := 0; goroutine < numGoroutines; goroutine++ {
 		go func(thread int) {
-			cur := thread * chunksPerThread
-			for chunk := cur; chunk < cur+chunksPerThread; chunk++ {
+			cur := thread * chunksPerGoroutine
+			if thread == numGoroutines-1 && chunksPerGoroutine*numGoroutines != totalChunks {
+				chunksPerGoroutine += totalChunks - chunksPerGoroutine*numGoroutines
+			}
+			for chunk := cur; chunk < cur+chunksPerGoroutine; chunk++ {
 				x := 2 * (chunk / chunksPerRow)
 				y := 2 * (chunk % chunksPerRow)
-				res[x/2][y/2] = evalNext(enlarged, x, y)
+				res[x/2][y/2] = evalChunk(enlarged, x, y)
 			}
 			wg.Done()
-		}(thread)
+		}(goroutine)
 	}
 	wg.Wait()
 	return res
 }
 
-func evalNext(mat [][]uint8, x, y int) uint8 {
+func evalChunk(mat [][]uint8, x, y int) uint8 {
 	sum := 0
-	for i := x; i < 4; i++ {
-		for j := y; j < y+4; j++ {
+	for i := x; i < x+sizeOfChunk; i++ {
+		for j := y; j < y+sizeOfChunk; j++ {
 			sum += int(mat[i][j])
 		}
 	}
